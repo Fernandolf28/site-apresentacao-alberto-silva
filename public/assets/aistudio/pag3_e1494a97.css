@@ -1,0 +1,94 @@
+*{
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    background-color: rgb(255, 252, 193);
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.faixa-verde {
+    background-color: rgb(23, 167, 0);
+    color: black;
+    text-align: center;
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 19px;
+    height: 150px;
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+    border: 2px solid black;
+}
+
+.faixa-verde h1 {
+    margin-top: 45px;
+    background-color: rgb(23, 167, 0);
+}
+
+.faixa-vermelha {
+    background-color: rgb(255, 49, 49);
+    height: 150px;
+    margin-right: 25%;
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+    border: 2px solid black;
+}
+
+.faixa-vermelha button{
+    background-color: rgb(255, 49, 49);
+    border: none;
+    height: 150px;
+    width: 150px;
+    font-size: 30px;
+}
+
+.faixa-amarela {
+    background-color: rgb(255, 222, 0);
+    height: 150px;
+    margin-right: 50%;
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+    border: 2px solid black;
+}
+
+.faixa-amarela button {
+    background-color: rgb(255, 222, 0);
+    border: none;
+    height: 150px;
+    width: 225px;
+    font-size: 30px;
+}
+
+.faixa-azul {
+    background-color: rgb(0, 56, 255);
+    height: 150px;
+    margin-right: 75%;
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+    border: 2px solid black;
+}
+
+.faixa-azul button {
+    background-color: rgb(0, 56, 255);
+    border: none;
+    height: 150px;
+    width: 150px;
+    font-size: 30px;
+}
+
+.faixa {
+    background-color: rgb(255, 252, 193);
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+.faixa button {
+    background-color: rgb(255, 252, 193);
+    border: none;
+    height: 150px;
+    width: 390px;
+    font-size: 30px;
+}

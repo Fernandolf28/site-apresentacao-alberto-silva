@@ -1,0 +1,6 @@
+{
+  "name": "Agora Nossa Apresentação",
+  "description": "Página de apresentação escolar com seções em dropdown contendo foto, texto e tabela de integrantes para Direção, Coordenação e Secretaria, Grêmio e Organização e Segurança da Escola.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

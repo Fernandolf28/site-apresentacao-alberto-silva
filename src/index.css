@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body {
+    background-color: rgb(255, 252, 193);
+    color: #000000;
+    font-family: "Plus Jakarta Sans", Arial, Helvetica, sans-serif;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+@keyframes school-tremble {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  15% {
+    transform: translate3d(-10px, 0, 0) rotate(-0.8deg);
+  }
+  30% {
+    transform: translate3d(10px, 0, 0) rotate(0.8deg);
+  }
+  45% {
+    transform: translate3d(-8px, 0, 0) rotate(-0.5deg);
+  }
+  60% {
+    transform: translate3d(8px, 0, 0) rotate(0.5deg);
+  }
+  75% {
+    transform: translate3d(-5px, 0, 0) rotate(-0.3deg);
+  }
+  90% {
+    transform: translate3d(5px, 0, 0) rotate(0.3deg);
+  }
+}
+
+.animate-school-tremble {
+  animation: school-tremble 0.55s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-school-tremble {
+    animation: none;
+  }
+}
