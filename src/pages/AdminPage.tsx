@@ -3,6 +3,7 @@ import {
   Camera,
   Check,
   ExternalLink,
+  Loader2,
   LogOut,
   Pencil,
   Plus,
@@ -21,21 +22,33 @@ import {
   TeacherMember,
 } from '../data/sections';
 import { SchoolAppState } from '../store/schoolStore';
+import { uploadImageToBucket } from '../lib/supabaseService';
 import { AppRoute } from '../components/Navbar';
 
 interface AdminPageProps {
   state: SchoolAppState;
-  onAddMember: (sectionId: SectionId, member: Omit<PersonMember, 'id'>) => void;
+  cloudReady: boolean;
+  cloudError: string | null;
+  onAddMember: (
+    sectionId: SectionId,
+    member: Omit<PersonMember, 'id'>
+  ) => Promise<void>;
   onUpdateMember: (
     fromSectionId: SectionId,
     toSectionId: SectionId,
     member: PersonMember
-  ) => void;
-  onDeleteMember: (sectionId: SectionId, memberId: string) => void;
-  onResetSectionMembers: (sectionId: SectionId) => void;
-  onSaveSlides: (slides: CarouselSlide[]) => void;
-  onSaveInfoSections: (sections: HomeInfoSection[]) => void;
-  onSaveTeachers: (teachers: TeacherMember[]) => void;
+  ) => Promise<void>;
+  onDeleteMember: (sectionId: SectionId, memberId: string) => Promise<void>;
+  onResetSectionMembers: (sectionId: SectionId) => Promise<void>;
+  onCreateSlide: (slide: Omit<CarouselSlide, 'id'>) => Promise<void>;
+  onUpdateSlide: (slide: CarouselSlide) => Promise<void>;
+  onDeleteSlide: (slideId: string) => Promise<void>;
+  onCreateInfoSection: (info: Omit<HomeInfoSection, 'id'>) => Promise<void>;
+  onUpdateInfoSection: (info: HomeInfoSection) => Promise<void>;
+  onDeleteInfoSection: (infoId: string) => Promise<void>;
+  onCreateTeacher: (teacher: Omit<TeacherMember, 'id'>) => Promise<void>;
+  onUpdateTeacher: (teacher: TeacherMember) => Promise<void>;
+  onDeleteTeacher: (teacherId: string) => Promise<void>;
   onNavigate: (route: AppRoute) => void;
   onLogout: () => void;
 }
@@ -51,13 +64,21 @@ function getInitials(name: string): string {
 
 export function AdminPage({
   state,
+  cloudReady,
+  cloudError,
   onAddMember,
   onUpdateMember,
   onDeleteMember,
   onResetSectionMembers,
-  onSaveSlides,
-  onSaveInfoSections,
-  onSaveTeachers,
+  onCreateSlide,
+  onUpdateSlide,
+  onDeleteSlide,
+  onCreateInfoSection,
+  onUpdateInfoSection,
+  onDeleteInfoSection,
+  onCreateTeacher,
+  onUpdateTeacher,
+  onDeleteTeacher,
   onNavigate,
   onLogout,
 }: AdminPageProps) {
@@ -65,6 +86,8 @@ export function AdminPage({
   const [selectedSection, setSelectedSection] = useState<SectionId>('direcao');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Formulário de Cadastro / Edição de Funcionário
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -77,6 +100,7 @@ export function AdminPage({
   const [formRole, setFormRole] = useState('');
   const [formInfo, setFormInfo] = useState('');
   const [formPhoto, setFormPhoto] = useState<string | undefined>(undefined);
+  const [isUploadingMemberPhoto, setIsUploadingMemberPhoto] = useState(false);
   const memberPhotoRef = useRef<HTMLInputElement>(null);
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -97,6 +121,7 @@ export function AdminPage({
   const [slideTheme, setSlideTheme] =
     useState<CarouselSlide['theme']>('campus');
   const [slideImage, setSlideImage] = useState<string | undefined>(undefined);
+  const [isUploadingSlidePhoto, setIsUploadingSlidePhoto] = useState(false);
   const slidePhotoRef = useRef<HTMLInputElement>(null);
 
   // Formulário de Professores (Roda na Página Inicial)
@@ -108,13 +133,23 @@ export function AdminPage({
   const [teacherPhoto, setTeacherPhoto] = useState<string | undefined>(
     undefined
   );
+  const [isUploadingTeacherPhoto, setIsUploadingTeacherPhoto] = useState(false);
   const teacherPhotoRef = useRef<HTMLInputElement>(null);
 
   const notify = (msg: string) => {
+    setErrorMessage(null);
     setStatusMessage(msg);
     window.setTimeout(() => {
       setStatusMessage((prev) => (prev === msg ? null : prev));
-    }, 4000);
+    }, 4500);
+  };
+
+  const notifyError = (err: unknown) => {
+    const msg =
+      err instanceof Error
+        ? err.message
+        : 'Não foi possível concluir a operação no Supabase.';
+    setErrorMessage(msg);
   };
 
   const currentMembers = state.membersBySection[selectedSection] ?? [];
@@ -148,49 +183,67 @@ export function AdminPage({
     setIsFormOpen(true);
   };
 
-  const handleMemberPhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleMemberPhotoUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setFormPhoto(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+
+    setIsUploadingMemberPhoto(true);
+    setErrorMessage(null);
+    try {
+      const publicUrl = await uploadImageToBucket(file, 'members');
+      setFormPhoto(publicUrl);
+      notify('Imagem enviada para o Supabase Storage com sucesso.');
+    } catch (err) {
+      notifyError(err);
+    } finally {
+      setIsUploadingMemberPhoto(false);
+    }
   };
 
-  const handleMemberFormSubmit = (e: React.FormEvent) => {
+  const handleMemberFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = formName.trim();
     const cleanRole = formRole.trim();
     const cleanInfo = formInfo.trim();
-    if (!cleanName || !cleanRole || !cleanInfo) return;
-
-    if (editingMember) {
-      onUpdateMember(editingMember.originalSectionId, formSectionId, {
-        id: editingMember.id,
-        name: cleanName,
-        role: cleanRole,
-        info: cleanInfo,
-        photoDataUrl: formPhoto,
-      });
-      setSelectedSection(formSectionId);
-      notify(`Dados de "${cleanName}" atualizados em Nossa Apresentação.`);
-    } else {
-      onAddMember(formSectionId, {
-        name: cleanName,
-        role: cleanRole,
-        info: cleanInfo,
-        photoDataUrl: formPhoto,
-      });
-      setSelectedSection(formSectionId);
-      notify(`"${cleanName}" cadastrado(a) com sucesso.`);
+    if (!cleanName || !cleanRole || !cleanInfo || isUploadingMemberPhoto) {
+      return;
     }
 
-    setIsFormOpen(false);
-    setEditingMember(null);
+    setIsSaving(true);
+    try {
+      if (editingMember) {
+        await onUpdateMember(editingMember.originalSectionId, formSectionId, {
+          id: editingMember.id,
+          name: cleanName,
+          role: cleanRole,
+          info: cleanInfo,
+          photoDataUrl: formPhoto,
+        });
+        setSelectedSection(formSectionId);
+        notify(
+          `Dados de "${cleanName}" atualizados no banco de dados Supabase.`
+        );
+      } else {
+        await onAddMember(formSectionId, {
+          name: cleanName,
+          role: cleanRole,
+          info: cleanInfo,
+          photoDataUrl: formPhoto,
+        });
+        setSelectedSection(formSectionId);
+        notify(`"${cleanName}" cadastrado(a) no Supabase com sucesso.`);
+      }
+
+      setIsFormOpen(false);
+      setEditingMember(null);
+    } catch (err) {
+      notifyError(err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // --- Handlers Página Inicial: Informações ---
@@ -210,42 +263,43 @@ export function AdminPage({
     setInfoFormOpen(true);
   };
 
-  const handleInfoSubmit = (e: React.FormEvent) => {
+  const handleInfoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!infoTitle.trim() || !infoContent.trim()) return;
-    if (editingInfoId) {
-      onSaveInfoSections(
-        state.infoSections.map((item) =>
-          item.id === editingInfoId
-            ? {
-                ...item,
-                title: infoTitle.trim(),
-                content: infoContent.trim(),
-                accentColor: infoColor,
-              }
-            : item
-        )
-      );
-      notify('Sessão de informação atualizada na Página Inicial.');
-    } else {
-      onSaveInfoSections([
-        ...state.infoSections,
-        {
-          id: `info-${Date.now()}`,
+    setIsSaving(true);
+    try {
+      if (editingInfoId) {
+        await onUpdateInfoSection({
+          id: editingInfoId,
           title: infoTitle.trim(),
           content: infoContent.trim(),
           accentColor: infoColor,
-        },
-      ]);
-      notify('Nova sessão de informação adicionada à Página Inicial.');
+        });
+        notify('Sessão de informação atualizada no Supabase.');
+      } else {
+        await onCreateInfoSection({
+          title: infoTitle.trim(),
+          content: infoContent.trim(),
+          accentColor: infoColor,
+        });
+        notify('Nova sessão de informação salva no Supabase.');
+      }
+      setInfoFormOpen(false);
+      setEditingInfoId(null);
+    } catch (err) {
+      notifyError(err);
+    } finally {
+      setIsSaving(false);
     }
-    setInfoFormOpen(false);
-    setEditingInfoId(null);
   };
 
-  const handleDeleteInfo = (id: string) => {
-    onSaveInfoSections(state.infoSections.filter((i) => i.id !== id));
-    notify('Sessão de informação removida.');
+  const handleDeleteInfo = async (id: string) => {
+    try {
+      await onDeleteInfoSection(id);
+      notify('Sessão de informação removida do Supabase.');
+    } catch (err) {
+      notifyError(err);
+    }
   };
 
   // --- Handlers Página Inicial: Carrossel ---
@@ -267,62 +321,74 @@ export function AdminPage({
     setSlideFormOpen(true);
   };
 
-  const handleSlideImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSlideImageUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setSlideImage(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+
+    setIsUploadingSlidePhoto(true);
+    setErrorMessage(null);
+    try {
+      const publicUrl = await uploadImageToBucket(file, 'slides');
+      setSlideImage(publicUrl);
+      notify('Imagem do slide enviada para o Supabase Storage.');
+    } catch (err) {
+      notifyError(err);
+    } finally {
+      setIsUploadingSlidePhoto(false);
+    }
   };
 
-  const handleSlideSubmit = (e: React.FormEvent) => {
+  const handleSlideSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!slideTitle.trim() || !slideSubtitle.trim()) return;
-    if (editingSlideId) {
-      onSaveSlides(
-        state.slides.map((s) =>
-          s.id === editingSlideId
-            ? {
-                ...s,
-                title: slideTitle.trim(),
-                subtitle: slideSubtitle.trim(),
-                theme: slideTheme,
-                imageDataUrl: slideImage,
-              }
-            : s
-        )
-      );
-      notify('Slide do carrossel atualizado.');
-    } else {
-      onSaveSlides([
-        ...state.slides,
-        {
-          id: `slide-${Date.now()}`,
+    if (!slideTitle.trim() || !slideSubtitle.trim() || isUploadingSlidePhoto) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      if (editingSlideId) {
+        const existing = state.slides.find((s) => s.id === editingSlideId);
+        await onUpdateSlide({
+          id: editingSlideId,
+          title: slideTitle.trim(),
+          subtitle: slideSubtitle.trim(),
+          accentBg: existing?.accentBg ?? '#17A700',
+          theme: slideTheme,
+          imageDataUrl: slideImage,
+        });
+        notify('Slide do carrossel atualizado no Supabase.');
+      } else {
+        await onCreateSlide({
           title: slideTitle.trim(),
           subtitle: slideSubtitle.trim(),
           accentBg: '#17A700',
           theme: slideTheme,
           imageDataUrl: slideImage,
-        },
-      ]);
-      notify('Novo slide adicionado ao carrossel.');
+        });
+        notify('Novo slide salvo no Supabase.');
+      }
+      setSlideFormOpen(false);
+      setEditingSlideId(null);
+    } catch (err) {
+      notifyError(err);
+    } finally {
+      setIsSaving(false);
     }
-    setSlideFormOpen(false);
-    setEditingSlideId(null);
   };
 
-  const handleDeleteSlide = (id: string) => {
+  const handleDeleteSlide = async (id: string) => {
     if (state.slides.length <= 1) {
       notify('Mantenha pelo menos 1 slide no carrossel.');
       return;
     }
-    onSaveSlides(state.slides.filter((s) => s.id !== id));
-    notify('Slide removido do carrossel.');
+    try {
+      await onDeleteSlide(id);
+      notify('Slide removido do Supabase.');
+    } catch (err) {
+      notifyError(err);
+    }
   };
 
   // --- Handlers Página Inicial: Professores ---
@@ -344,63 +410,76 @@ export function AdminPage({
     setTeacherFormOpen(true);
   };
 
-  const handleTeacherPhotoUpload = (
+  const handleTeacherPhotoUpload = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setTeacherPhoto(reader.result);
-      }
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+
+    setIsUploadingTeacherPhoto(true);
+    setErrorMessage(null);
+    try {
+      const publicUrl = await uploadImageToBucket(file, 'teachers');
+      setTeacherPhoto(publicUrl);
+      notify('Foto do professor enviada para o Supabase Storage.');
+    } catch (err) {
+      notifyError(err);
+    } finally {
+      setIsUploadingTeacherPhoto(false);
+    }
   };
 
-  const handleTeacherSubmit = (e: React.FormEvent) => {
+  const handleTeacherSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teacherName.trim() || !teacherSubject.trim() || !teacherInfo.trim()) {
+    if (
+      !teacherName.trim() ||
+      !teacherSubject.trim() ||
+      !teacherInfo.trim() ||
+      isUploadingTeacherPhoto
+    ) {
       return;
     }
 
-    if (editingTeacherId) {
-      onSaveTeachers(
-        state.teachers.map((t) =>
-          t.id === editingTeacherId
-            ? {
-                ...t,
-                name: teacherName.trim(),
-                subject: teacherSubject.trim(),
-                info: teacherInfo.trim(),
-                photoDataUrl: teacherPhoto,
-              }
-            : t
-        )
-      );
-      notify(`Dados de "${teacherName.trim()}" atualizados na roda de professores.`);
-    } else {
-      onSaveTeachers([
-        ...state.teachers,
-        {
-          id: `prof-${Date.now()}`,
+    setIsSaving(true);
+    try {
+      if (editingTeacherId) {
+        await onUpdateTeacher({
+          id: editingTeacherId,
           name: teacherName.trim(),
           subject: teacherSubject.trim(),
           info: teacherInfo.trim(),
           photoDataUrl: teacherPhoto,
-        },
-      ]);
-      notify(`"${teacherName.trim()}" adicionado(a) à roda de professores.`);
-    }
+        });
+        notify(
+          `Dados de "${teacherName.trim()}" atualizados no banco de dados Supabase.`
+        );
+      } else {
+        await onCreateTeacher({
+          name: teacherName.trim(),
+          subject: teacherSubject.trim(),
+          info: teacherInfo.trim(),
+          photoDataUrl: teacherPhoto,
+        });
+        notify(`"${teacherName.trim()}" salvo(a) no Supabase com sucesso.`);
+      }
 
-    setTeacherFormOpen(false);
-    setEditingTeacherId(null);
+      setTeacherFormOpen(false);
+      setEditingTeacherId(null);
+    } catch (err) {
+      notifyError(err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
-  const handleDeleteTeacher = (id: string) => {
-    onSaveTeachers(state.teachers.filter((t) => t.id !== id));
-    notify('Professor removido da roda.');
+  const handleDeleteTeacher = async (id: string) => {
+    try {
+      await onDeleteTeacher(id);
+      notify('Professor removido do Supabase.');
+    } catch (err) {
+      notifyError(err);
+    }
   };
 
   const activeSectionMeta = SCHOOL_SECTIONS.find(
@@ -448,6 +527,33 @@ export function AdminPage({
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+        {!cloudReady && cloudError && (
+          <div
+            role="alert"
+            className="bg-[#FFDE00] text-black border-2 border-black rounded-[8px] px-4 py-3 text-sm font-semibold"
+          >
+            {cloudError} Execute o SQL no SQL Editor do Supabase para ativar o
+            salvamento permanente em nuvem.
+          </div>
+        )}
+
+        {errorMessage && (
+          <div
+            role="alert"
+            className="bg-[#FF3131]/20 text-black border-2 border-black rounded-[8px] px-4 py-3 text-sm font-bold flex items-center justify-between gap-3"
+          >
+            <span>{errorMessage}</span>
+            <button
+              type="button"
+              onClick={() => setErrorMessage(null)}
+              aria-label="Fechar erro"
+              className="p-1 hover:bg-black/10 rounded cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Feedback de operação */}
         {statusMessage && (
           <div
@@ -488,7 +594,7 @@ export function AdminPage({
                 : 'text-black hover:bg-[#FFFCC1]'
             }`}
           >
-            Página Inicial (Carrossel e Informações)
+            Página Inicial (Carrossel, Informações e Professores)
           </button>
         </div>
 
@@ -583,10 +689,16 @@ export function AdminPage({
                     <span className="text-xs font-bold">Restaurar setor?</span>
                     <button
                       type="button"
-                      onClick={() => {
-                        onResetSectionMembers(selectedSection);
-                        setConfirmResetSection(false);
-                        notify('Lista padrão do setor restaurada.');
+                      onClick={async () => {
+                        try {
+                          await onResetSectionMembers(selectedSection);
+                          setConfirmResetSection(false);
+                          notify(
+                            'Lista padrão do setor restaurada no Supabase.'
+                          );
+                        } catch (err) {
+                          notifyError(err);
+                        }
                       }}
                       className="px-2 py-1 text-xs font-bold bg-[#FF3131] text-black border border-black rounded cursor-pointer"
                     >
@@ -630,13 +742,24 @@ export function AdminPage({
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-6 items-start">
-                  {/* Upload da Foto */}
+                  {/* Upload da Foto para o Supabase Storage */}
                   <div className="flex flex-col items-center gap-3">
                     <div className="w-40 h-40 rounded-[8px] border-2 border-black bg-white overflow-hidden flex items-center justify-center">
-                      {formPhoto ? (
+                      {isUploadingMemberPhoto ? (
+                        <div className="flex flex-col items-center gap-2 text-neutral-700 p-3">
+                          <Loader2
+                            className="w-8 h-8 animate-spin"
+                            aria-hidden="true"
+                          />
+                          <span className="text-xs font-semibold">
+                            Enviando...
+                          </span>
+                        </div>
+                      ) : formPhoto ? (
                         <img
                           src={formPhoto}
                           alt="Prévia da foto"
+                          referrerPolicy="no-referrer"
                           className="w-full h-full object-cover"
                         />
                       ) : (
@@ -657,13 +780,14 @@ export function AdminPage({
                     <div className="flex flex-wrap justify-center gap-2">
                       <button
                         type="button"
+                        disabled={isUploadingMemberPhoto}
                         onClick={() => memberPhotoRef.current?.click()}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border-2 border-black rounded-[6px] hover:bg-[#FFFCC1] cursor-pointer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border-2 border-black rounded-[6px] hover:bg-[#FFFCC1] cursor-pointer disabled:opacity-60"
                       >
                         <Camera className="w-3.5 h-3.5" aria-hidden="true" />
                         <span>{formPhoto ? 'Trocar foto' : 'Enviar foto'}</span>
                       </button>
-                      {formPhoto && (
+                      {formPhoto && !isUploadingMemberPhoto && (
                         <button
                           type="button"
                           onClick={() => setFormPhoto(undefined)}
@@ -757,9 +881,17 @@ export function AdminPage({
                     <div className="sm:col-span-2 flex flex-wrap items-center gap-2 pt-1">
                       <button
                         type="submit"
-                        className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] hover:brightness-95 transition cursor-pointer"
+                        disabled={isSaving || isUploadingMemberPhoto}
+                        className="inline-flex items-center gap-1.5 px-5 py-2.5 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] hover:brightness-95 transition cursor-pointer disabled:opacity-60"
                       >
-                        <Check className="w-4 h-4" aria-hidden="true" />
+                        {isSaving ? (
+                          <Loader2
+                            className="w-4 h-4 animate-spin"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Check className="w-4 h-4" aria-hidden="true" />
+                        )}
                         <span>
                           {editingMember ? 'Salvar alterações' : 'Cadastrar'}
                         </span>
@@ -837,6 +969,7 @@ export function AdminPage({
                                 <img
                                   src={member.photoDataUrl}
                                   alt={`Foto de ${member.name}`}
+                                  referrerPolicy="no-referrer"
                                   className="w-full h-full object-cover"
                                 />
                               ) : (
@@ -860,12 +993,19 @@ export function AdminPage({
                               <div className="inline-flex items-center gap-1.5">
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    onDeleteMember(selectedSection, member.id);
-                                    setConfirmDeleteId(null);
-                                    notify(
-                                      `"${member.name}" excluído(a) com sucesso.`
-                                    );
+                                  onClick={async () => {
+                                    try {
+                                      await onDeleteMember(
+                                        selectedSection,
+                                        member.id
+                                      );
+                                      setConfirmDeleteId(null);
+                                      notify(
+                                        `"${member.name}" excluído(a) do Supabase.`
+                                      );
+                                    } catch (err) {
+                                      notifyError(err);
+                                    }
                                   }}
                                   className="px-2.5 py-1.5 text-xs font-bold bg-[#FF3131] text-black border-2 border-black rounded-[4px] cursor-pointer whitespace-nowrap"
                                 >
@@ -915,7 +1055,7 @@ export function AdminPage({
             </div>
           </div>
         ) : (
-          /* ABA 2: Gerenciamento da Página Inicial (Carrossel e Informações) */
+          /* ABA 2: Gerenciamento da Página Inicial */
           <div className="space-y-10">
             {/* Sessões de Informações */}
             <section className="space-y-4">
@@ -925,8 +1065,8 @@ export function AdminPage({
                     Sessões de Informações (Página Inicial)
                   </h2>
                   <p className="text-sm text-neutral-700">
-                    Cadastre, edite ou remova os blocos de informações exibidos
-                    na Página Inicial.
+                    Edite os textos das caixas exibidas na seção Informações e
+                    Comunicados.
                   </p>
                 </div>
                 <button
@@ -1008,7 +1148,8 @@ export function AdminPage({
                   <div className="flex gap-2">
                     <button
                       type="submit"
-                      className="px-4 py-2 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] cursor-pointer"
+                      disabled={isSaving}
+                      className="px-4 py-2 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] cursor-pointer disabled:opacity-60"
                     >
                       Salvar
                     </button>
@@ -1023,7 +1164,7 @@ export function AdminPage({
                 </form>
               )}
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {state.infoSections.map((item) => (
                   <div
                     key={item.id}
@@ -1068,8 +1209,8 @@ export function AdminPage({
                     Slides do Carrossel (Página Inicial)
                   </h2>
                   <p className="text-sm text-neutral-700">
-                    Gerencie os slides, títulos e imagens do carrossel da página
-                    inicial.
+                    Envie fotos para o bucket <strong>school-images</strong> e
+                    edite os slides da página inicial.
                   </p>
                 </div>
                 <button
@@ -1160,15 +1301,27 @@ export function AdminPage({
                     />
                     <button
                       type="button"
+                      disabled={isUploadingSlidePhoto}
                       onClick={() => slidePhotoRef.current?.click()}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-white border-2 border-black rounded-[6px] hover:bg-[#FFFCC1] cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-white border-2 border-black rounded-[6px] hover:bg-[#FFFCC1] cursor-pointer disabled:opacity-60"
                     >
-                      <Camera className="w-4 h-4" aria-hidden="true" />
+                      {isUploadingSlidePhoto ? (
+                        <Loader2
+                          className="w-4 h-4 animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Camera className="w-4 h-4" aria-hidden="true" />
+                      )}
                       <span>
-                        {slideImage ? 'Trocar imagem' : 'Enviar imagem própria'}
+                        {isUploadingSlidePhoto
+                          ? 'Enviando para nuvem...'
+                          : slideImage
+                            ? 'Trocar imagem'
+                            : 'Enviar imagem para nuvem'}
                       </span>
                     </button>
-                    {slideImage && (
+                    {slideImage && !isUploadingSlidePhoto && (
                       <button
                         type="button"
                         onClick={() => setSlideImage(undefined)}
@@ -1179,10 +1332,22 @@ export function AdminPage({
                     )}
                   </div>
 
+                  {slideImage && (
+                    <div className="w-full max-w-xs aspect-[16/9] rounded-[6px] border-2 border-black overflow-hidden bg-white">
+                      <img
+                        src={slideImage}
+                        alt="Prévia do slide"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
                     <button
                       type="submit"
-                      className="px-4 py-2 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] cursor-pointer"
+                      disabled={isSaving || isUploadingSlidePhoto}
+                      className="px-4 py-2 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] cursor-pointer disabled:opacity-60"
                     >
                       Salvar Slide
                     </button>
@@ -1236,6 +1401,7 @@ export function AdminPage({
                 ))}
               </div>
             </section>
+
             {/* Roda de Professores */}
             <section className="space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-3 bg-[#FFFDF0] border-2 border-black rounded-[10px] p-5">
@@ -1333,15 +1499,27 @@ export function AdminPage({
                     />
                     <button
                       type="button"
+                      disabled={isUploadingTeacherPhoto}
                       onClick={() => teacherPhotoRef.current?.click()}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-white border-2 border-black rounded-[6px] hover:bg-[#FFFCC1] cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-white border-2 border-black rounded-[6px] hover:bg-[#FFFCC1] cursor-pointer disabled:opacity-60"
                     >
-                      <Camera className="w-4 h-4" aria-hidden="true" />
+                      {isUploadingTeacherPhoto ? (
+                        <Loader2
+                          className="w-4 h-4 animate-spin"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Camera className="w-4 h-4" aria-hidden="true" />
+                      )}
                       <span>
-                        {teacherPhoto ? 'Trocar foto' : 'Enviar foto'}
+                        {isUploadingTeacherPhoto
+                          ? 'Enviando foto...'
+                          : teacherPhoto
+                            ? 'Trocar foto'
+                            : 'Enviar foto'}
                       </span>
                     </button>
-                    {teacherPhoto && (
+                    {teacherPhoto && !isUploadingTeacherPhoto && (
                       <button
                         type="button"
                         onClick={() => setTeacherPhoto(undefined)}
@@ -1352,10 +1530,22 @@ export function AdminPage({
                     )}
                   </div>
 
+                  {teacherPhoto && (
+                    <div className="w-20 h-20 rounded-[8px] border-2 border-black overflow-hidden bg-white">
+                      <img
+                        src={teacherPhoto}
+                        alt="Prévia da foto do professor"
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+
                   <div className="flex gap-2">
                     <button
                       type="submit"
-                      className="px-4 py-2 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] cursor-pointer"
+                      disabled={isSaving || isUploadingTeacherPhoto}
+                      className="px-4 py-2 text-sm font-bold bg-[#17A700] text-black border-2 border-black rounded-[6px] cursor-pointer disabled:opacity-60"
                     >
                       Salvar Professor
                     </button>
@@ -1382,6 +1572,7 @@ export function AdminPage({
                           <img
                             src={teacher.photoDataUrl}
                             alt={`Foto de ${teacher.name}`}
+                            referrerPolicy="no-referrer"
                             className="w-full h-full object-cover"
                           />
                         ) : (

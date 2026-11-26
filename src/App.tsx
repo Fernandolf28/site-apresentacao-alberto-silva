@@ -3,17 +3,31 @@ import {
   CarouselSlide,
   HomeInfoSection,
   PersonMember,
-  SCHOOL_SECTIONS,
   SectionId,
   TeacherMember,
 } from './data/sections';
 import {
+  buildDefaultState,
   loadAdminAuth,
-  loadSchoolState,
   saveAdminAuth,
-  saveSchoolState,
   SchoolAppState,
 } from './store/schoolStore';
+import {
+  deleteInfoSectionInSupabase,
+  deleteMemberInSupabase,
+  deleteSlideInSupabase,
+  deleteTeacherInSupabase,
+  fetchAllSchoolData,
+  insertInfoSectionInSupabase,
+  insertMemberInSupabase,
+  insertSlideInSupabase,
+  insertTeacherInSupabase,
+  resetSectionMembersInSupabase,
+  updateInfoSectionInSupabase,
+  updateMemberInSupabase,
+  updateSlideInSupabase,
+  updateTeacherInSupabase,
+} from './lib/supabaseService';
 import { AppRoute } from './components/Navbar';
 import { BookOpeningTransition } from './components/BookOpeningTransition';
 import { SchoolIntroPage } from './pages/SchoolIntroPage';
@@ -38,12 +52,23 @@ export default function App() {
     loadAdminAuth()
   );
   const [appState, setAppState] = useState<SchoolAppState>(() =>
-    loadSchoolState()
+    buildDefaultState()
   );
+  const [cloudReady, setCloudReady] = useState(false);
+  const [cloudError, setCloudError] = useState<string | null>(null);
 
   useEffect(() => {
-    saveSchoolState(appState);
-  }, [appState]);
+    let active = true;
+    fetchAllSchoolData().then((result) => {
+      if (!active) return;
+      setAppState(result.state);
+      setCloudReady(result.cloudReady);
+      setCloudError(result.errorMessage ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const onHashChange = () => {
@@ -95,7 +120,8 @@ export default function App() {
     navigate('home');
   };
 
-  const handleAddMember = (
+  // --- CRUD Equipes ("Nossa Apresentação") ---
+  const handleAddMember = async (
     sectionId: SectionId,
     member: Omit<PersonMember, 'id'>
   ) => {
@@ -103,6 +129,8 @@ export default function App() {
       ...member,
       id: `${sectionId}-${Date.now()}`,
     };
+    const sortOrder = appState.membersBySection[sectionId].length;
+    await insertMemberInSupabase(sectionId, newMember, sortOrder);
     setAppState((prev) => ({
       ...prev,
       membersBySection: {
@@ -112,11 +140,12 @@ export default function App() {
     }));
   };
 
-  const handleUpdateMember = (
+  const handleUpdateMember = async (
     fromSectionId: SectionId,
     toSectionId: SectionId,
     updatedMember: PersonMember
   ) => {
+    await updateMemberInSupabase(toSectionId, updatedMember);
     setAppState((prev) => {
       if (fromSectionId === toSectionId) {
         return {
@@ -143,7 +172,11 @@ export default function App() {
     });
   };
 
-  const handleDeleteMember = (sectionId: SectionId, memberId: string) => {
+  const handleDeleteMember = async (
+    sectionId: SectionId,
+    memberId: string
+  ) => {
+    await deleteMemberInSupabase(memberId);
     setAppState((prev) => ({
       ...prev,
       membersBySection: {
@@ -155,28 +188,110 @@ export default function App() {
     }));
   };
 
-  const handleResetSectionMembers = (sectionId: SectionId) => {
-    const section = SCHOOL_SECTIONS.find((s) => s.id === sectionId);
-    if (!section) return;
+  const handleResetSectionMembers = async (sectionId: SectionId) => {
+    const restored = await resetSectionMembersInSupabase(sectionId);
     setAppState((prev) => ({
       ...prev,
       membersBySection: {
         ...prev.membersBySection,
-        [sectionId]: section.defaultMembers.map((m) => ({ ...m })),
+        [sectionId]: restored,
       },
     }));
   };
 
-  const handleSaveSlides = (slides: CarouselSlide[]) => {
-    setAppState((prev) => ({ ...prev, slides }));
+  // --- CRUD Slides do Carrossel ---
+  const handleCreateSlide = async (slide: Omit<CarouselSlide, 'id'>) => {
+    const newSlide: CarouselSlide = {
+      ...slide,
+      id: `slide-${Date.now()}`,
+    };
+    await insertSlideInSupabase(newSlide, appState.slides.length);
+    setAppState((prev) => ({
+      ...prev,
+      slides: [...prev.slides, newSlide],
+    }));
   };
 
-  const handleSaveInfoSections = (infoSections: HomeInfoSection[]) => {
-    setAppState((prev) => ({ ...prev, infoSections }));
+  const handleUpdateSlide = async (updatedSlide: CarouselSlide) => {
+    await updateSlideInSupabase(updatedSlide);
+    setAppState((prev) => ({
+      ...prev,
+      slides: prev.slides.map((s) =>
+        s.id === updatedSlide.id ? updatedSlide : s
+      ),
+    }));
   };
 
-  const handleSaveTeachers = (teachers: TeacherMember[]) => {
-    setAppState((prev) => ({ ...prev, teachers }));
+  const handleDeleteSlide = async (slideId: string) => {
+    await deleteSlideInSupabase(slideId);
+    setAppState((prev) => ({
+      ...prev,
+      slides: prev.slides.filter((s) => s.id !== slideId),
+    }));
+  };
+
+  // --- CRUD Sessões de Informações ---
+  const handleCreateInfoSection = async (
+    info: Omit<HomeInfoSection, 'id'>
+  ) => {
+    const newInfo: HomeInfoSection = {
+      ...info,
+      id: `info-${Date.now()}`,
+    };
+    await insertInfoSectionInSupabase(newInfo, appState.infoSections.length);
+    setAppState((prev) => ({
+      ...prev,
+      infoSections: [...prev.infoSections, newInfo],
+    }));
+  };
+
+  const handleUpdateInfoSection = async (updatedInfo: HomeInfoSection) => {
+    await updateInfoSectionInSupabase(updatedInfo);
+    setAppState((prev) => ({
+      ...prev,
+      infoSections: prev.infoSections.map((item) =>
+        item.id === updatedInfo.id ? updatedInfo : item
+      ),
+    }));
+  };
+
+  const handleDeleteInfoSection = async (infoId: string) => {
+    await deleteInfoSectionInSupabase(infoId);
+    setAppState((prev) => ({
+      ...prev,
+      infoSections: prev.infoSections.filter((item) => item.id !== infoId),
+    }));
+  };
+
+  // --- CRUD Professores ---
+  const handleCreateTeacher = async (teacher: Omit<TeacherMember, 'id'>) => {
+    const newTeacher: TeacherMember = {
+      ...teacher,
+      id: `prof-${Date.now()}`,
+    };
+    await insertTeacherInSupabase(newTeacher, appState.teachers.length);
+    setAppState((prev) => ({
+      ...prev,
+      teachers: [...prev.teachers, newTeacher],
+    }));
+  };
+
+  const handleUpdateTeacher = async (updatedTeacher: TeacherMember) => {
+    await updateTeacherInSupabase(updatedTeacher);
+    setAppState((prev) => ({
+      ...prev,
+      teachers: prev.teachers.map((t) =>
+        t.id === updatedTeacher.id ? updatedTeacher : t
+      ),
+    }));
+  };
+
+  const handleDeleteTeacher = async (teacherId: string) => {
+    await deleteTeacherInSupabase(teacherId);
+    setAppState((prev) => ({
+      ...prev,
+      teachers: prev.teachers.filter((t) => t.id !== teacherId),
+    }));
   };
 
   // Proteção da rota administrativa
@@ -213,13 +328,21 @@ export default function App() {
     return (
       <AdminPage
         state={appState}
+        cloudReady={cloudReady}
+        cloudError={cloudError}
         onAddMember={handleAddMember}
         onUpdateMember={handleUpdateMember}
         onDeleteMember={handleDeleteMember}
         onResetSectionMembers={handleResetSectionMembers}
-        onSaveSlides={handleSaveSlides}
-        onSaveInfoSections={handleSaveInfoSections}
-        onSaveTeachers={handleSaveTeachers}
+        onCreateSlide={handleCreateSlide}
+        onUpdateSlide={handleUpdateSlide}
+        onDeleteSlide={handleDeleteSlide}
+        onCreateInfoSection={handleCreateInfoSection}
+        onUpdateInfoSection={handleUpdateInfoSection}
+        onDeleteInfoSection={handleDeleteInfoSection}
+        onCreateTeacher={handleCreateTeacher}
+        onUpdateTeacher={handleUpdateTeacher}
+        onDeleteTeacher={handleDeleteTeacher}
         onNavigate={navigate}
         onLogout={handleLogout}
       />

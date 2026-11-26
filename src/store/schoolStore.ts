@@ -19,8 +19,6 @@ export interface SchoolAppState {
   teachers: TeacherMember[];
 }
 
-const DATA_STORAGE_KEY = 'portal_escolar_dados_v2';
-const LEGACY_STORAGE_KEY = 'portal_escolar_dados_v1';
 const AUTH_STORAGE_KEY = 'portal_escolar_admin_auth_v1';
 
 export function buildDefaultMembers(): MembersBySection {
@@ -38,74 +36,6 @@ export function buildDefaultState(): SchoolAppState {
     infoSections: DEFAULT_HOME_INFO_SECTIONS.map((i) => ({ ...i })),
     teachers: DEFAULT_TEACHERS.map((t) => ({ ...t })),
   };
-}
-
-export function loadSchoolState(): SchoolAppState {
-  const defaults = buildDefaultState();
-  try {
-    const rawV2 = localStorage.getItem(DATA_STORAGE_KEY);
-    if (rawV2) {
-      const parsed = JSON.parse(rawV2) as Partial<SchoolAppState>;
-      const membersBySection = { ...defaults.membersBySection };
-      if (parsed.membersBySection) {
-        for (const section of SCHOOL_SECTIONS) {
-          const list = parsed.membersBySection[section.id];
-          if (Array.isArray(list)) {
-            membersBySection[section.id] = list;
-          }
-        }
-      }
-      return {
-        membersBySection,
-        slides:
-          Array.isArray(parsed.slides) && parsed.slides.length > 0
-            ? parsed.slides
-            : defaults.slides,
-        infoSections: Array.isArray(parsed.infoSections)
-          ? parsed.infoSections
-          : defaults.infoSections,
-        teachers: Array.isArray(parsed.teachers)
-          ? parsed.teachers
-          : defaults.teachers,
-      };
-    }
-
-    // Migração suave de v1 preservando equipes e slides salvos, aplicando o novo layout de 2 caixas + professores
-    const rawV1 = localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (rawV1) {
-      const parsedV1 = JSON.parse(rawV1) as Partial<SchoolAppState>;
-      const membersBySection = { ...defaults.membersBySection };
-      if (parsedV1.membersBySection) {
-        for (const section of SCHOOL_SECTIONS) {
-          const list = parsedV1.membersBySection[section.id];
-          if (Array.isArray(list)) {
-            membersBySection[section.id] = list;
-          }
-        }
-      }
-      return {
-        membersBySection,
-        slides:
-          Array.isArray(parsedV1.slides) && parsedV1.slides.length > 0
-            ? parsedV1.slides
-            : defaults.slides,
-        infoSections: defaults.infoSections,
-        teachers: defaults.teachers,
-      };
-    }
-
-    return defaults;
-  } catch {
-    return defaults;
-  }
-}
-
-export function saveSchoolState(state: SchoolAppState): void {
-  try {
-    localStorage.setItem(DATA_STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // Ignore storage quota errors cleanly
-  }
 }
 
 export function loadAdminAuth(): boolean {
